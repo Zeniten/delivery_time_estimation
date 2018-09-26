@@ -1,4 +1,6 @@
 from geopy.distance import geodesic
+import pandas as pd
+
 from datetime import datetime, timedelta
 import time
 
@@ -10,11 +12,13 @@ routeplans = routeplans()
 driverpositions = driverpositions()
 stoplocations = stoplocations()
 
-AVERAGE_WALKING_SPEED = 5 # km/h
-R = 50 # radius of 30 meters
+AVERAGE_WALKING_SPEED = 5   # km/h
+R = 50  # radius of 30 meters
+
 
 def driver_is_inside_location_area(driver_position, location_position):
     return geodesic(driver_position, location_position).meters <= R
+
 
 def estimated_duration(timestamps_list):
     if not timestamps_list:
@@ -23,8 +27,10 @@ def estimated_duration(timestamps_list):
         durations = [int(timedelta.total_seconds(timestamps[1] - timestamps[0])) for timestamps in timestamps_list]
         return max(durations)
 
+
 def driver_is_moving_at_walking_speed(speed):
-    return speed < AVERAGE_WALKING_SPEED + 2 # buffer
+    return speed < AVERAGE_WALKING_SPEED + 2    # buffer
+
 
 def enter_and_leave_timestamps(driver_positions, stoplocation_position, deliverystatustimestamp):
     enter_timestamp = 0
@@ -35,7 +41,7 @@ def enter_and_leave_timestamps(driver_positions, stoplocation_position, delivery
     # -- What does "best one" mean?
     timestamps_list = []
 
-    for e in driver_positions:
+    for idx, e in driver_positions.iterrows():
         if enter_timestamp == 0:
             # Optimizing enter_timestamp
             # Idea: Use speed data to shrink R, decreasing the area.
@@ -47,7 +53,7 @@ def enter_and_leave_timestamps(driver_positions, stoplocation_position, delivery
                 timestamps_list.append((enter_timestamp, leave_timestamp))
                 enter_timestamp = 0
                 leave_timestamp = 0
-    
+
     # Optimizing leave_timestamp
     # Use deliverystatustimestamp if driver registered delivery before leaving the area
     # Comment: Some drivers might register delivery before actually delivering. E.g., a driver might drive to
@@ -57,73 +63,32 @@ def enter_and_leave_timestamps(driver_positions, stoplocation_position, delivery
 
     return timestamps_list
 
-# def fill_in_delivery_time_estimates():
-#     for routeplanid, routes in routeplans.items():
-#         for routeid, driver in routes.items():
-#             for driverid, stoplocs in driver.items():
-#                 for stoplocationid, duration in stoplocs.items():
-#                     stoplocation = {}
 
-#                     try:
-#                         # some stoplocationids are not in stoplocations
-#                         stoplocation = stoplocations[routeplanid][routeid][stoplocationid]
-#                         driver_positions = driverpositions[routeid][driverid]
-#                     except:
-#                         continue
+estimated_durations_data = []
 
-#                     deliverystatustimestamp = stoplocations[routeplanid][routeid][stoplocationid]["deliverystatustimestamp"]
-
-#                     timestamps = enter_and_leave_timestamps(
-#                         driver_positions,
-#                         stoplocation["position"],
-#                         deliverystatustimestamp
-#                     )
-
-#                     routeplans[routeplanid][routeid][driverid][stoplocationid]["estimated_duration"] = estimated_duration(timestamps)
-
-estimated_durations = []
 
 def fill_in_delivery_time_estimates():
-    for item in routeplans:
-        try:
-            # item[0]: routeplanid
-            # item[1]: routeid
-            # item[2]: driverid
-            # item[3]: stoplocationid
-            # item[4]: duration
-
-            # some stoplocationids are not in stoplocations
-            routeplanid = int(item[0])
-            routeid = int(item[1])
-            driverid = int(item[2])
-            stoplocationid = int(item[3])
-
-            stoplocation = stoplocations[routeplanid][routeid][stoplocationid]
-            driver_positions = driverpositions[routeid][driverid]
-            stoplocation_position = stoplocation["position"]
-            deliverystatustimestamp = stoplocation["deliverystatustimestamp"]
-
-            timestamps = enter_and_leave_timestamps(
-                driver_positions,
-                stoplocation_position,
-                deliverystatustimestamp
-            )
-
-            estimated_durations.append(item + [estimated_duration(timestamps)])
-        except:
+    for idx, routeplan in routeplans.iterrows():
+        # some stoplocationids are not in stoplocations
+        stoplocation = stoplocations[ stoplocations['stoplocationid'] == routeplan['stoplocationid'] ]
+        driver_positions = driverpositions[ driverpositions['routeid'] == routeplan['routeid'] ][ driverpositions['driverid'] == routeplan['driverid'] ]
+        if stoplocation.empty or driverpositions.empty:
             continue
+        stoplocation_position = stoplocation["position"].iloc[0]
+        deliverystatustimestamp = stoplocation["deliverystatustimestamp"].iloc[0]
 
-fill_in_delivery_time_estimates()
+        timestamps = enter_and_leave_timestamps(
+            driver_positions,
+            stoplocation_position,
+            deliverystatustimestamp
+        )
+        estimated_durations_data.append([routeplan['routeplanid'], estimated_duration(timestamps)])
 
-#create_csv(routeplans, stoplocations)
 
-# for routeplanid, routes in routeplans.items():
-#     for routeid, driver in routes.items():
-#         for driverid, stoplocs in driver.items():
-#             for stoplocationid, durations in stoplocs.items():
-#                 if len(durations) > 1:
-#                     print(durations)
+if __name__ == '__main__':
+    print('starting...')
+    fill_in_delivery_time_estimates()
+    estimated_durations = pd.DataFrame(estimated_durations_data, columns=['routeplanid', 'estimated_duration'])
+    create_csv(routeplans, stoplocations, driverpositions, estimated_durations)
 
-print(estimated_durations)
-
-print("--- %s seconds ---" % (time.time() - start_time))
+    print("--- %s seconds ---" % (time.time() - start_time))
